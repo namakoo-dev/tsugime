@@ -1,0 +1,14 @@
+# Runtime dependency of the MCP server (server.py) only.
+#
+# sources.py and reconcile.py are deliberately standard-library only: they are
+# the part that reads your files and computes the difference, and that part has
+# to be runnable by anyone -- from a plain `python reconcile.py`, from CI, or
+# from a hook -- without an environment being activated.
+#
+# Pinned below 2.0: mcp 2.x removed the FastMCP API this server is built on
+# (`mcp.server.fastmcp.FastMCP`). Tested against 1.29.
+#
+# ASCII ONLY. pip reads this file with locale.getpreferredencoding() when there
+# is no BOM, so a non-ASCII byte here makes `pip install -r` fail outright on
+# any machine whose default codepage is not UTF-8 or cp1252.
+mcp>=1.29,<2

@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tsugime"
+version = "0.1.0"
+description = "Declare what should stay in sync across your tools, then be told when it drifts. An MCP server."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+keywords = ["mcp", "model-context-protocol", "drift-detection", "reconciliation", "claude-code"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Quality Assurance",
+]
+dependencies = ["mcp>=1.29,<2"]
+
+[project.urls]
+Repository = "https://github.com/watasisaikou/tsugime"
+
+[tool.setuptools]
+# Flat layout: three top-level modules, so setuptools has to be told
+# explicitly rather than left to auto-discovery.
+py-modules = ["server", "reconcile", "sources"]
+
+[tool.ruff]
+line-length = 96
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

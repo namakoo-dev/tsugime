@@ -1,0 +1,172 @@
+# tsugime — この環境で成り立っているべき対応関係
+#
+# 1 つの規則は「左」「右」「どちらがどちらを含むべきか」だけを言う。
+# 直し方は書かない。何を直すかは、ずれを見た人（か AI）が決める。
+
+# ---------------------------------------------------------------------------
+# 記憶: 索引に載っていない記憶は、毎セッション読み込まれない = 存在しないのと同じ
+#
+# 2026-08-03 に実際に 2 件見つかった:
+#   feedback_verify_before_asserting.md / project_idfu_unwired_aws_publisher.md
+# どちらも書かれてから一度も読み込まれていなかった。この規則はその再発を防ぐ。
+# ---------------------------------------------------------------------------
+[[rule]]
+name = "memory-indexed"
+title = "すべての記憶ファイルが MEMORY.md から辿れる"
+direction = "left_subset_right"
+left_label = "MEMORY.md"
+right_label = "MEMORY.md"
+note = "索引に無い記憶は毎セッション読み込まれない。書いた意味が消える"
+
+[rule.left]
+kind = "dir"
+path = "~/.claude/projects/C--Windows-system32/memory"
+glob = "*.md"
+only = "files"
+exclude = ["MEMORY.md"]
+
+[rule.right]
+kind = "markdown_links"
+path = "~/.claude/projects/C--Windows-system32/memory/MEMORY.md"
+
+# 逆向き: 索引にあるのに実体が無い = 消したファイルの幽霊
+[[rule]]
+name = "memory-no-ghosts"
+title = "MEMORY.md の項目に実体がある"
+direction = "left_subset_right"
+left_label = "実体"
+right_label = "実体"
+note = "実体の無い索引項目は、消したファイルの残骸"
+
+[rule.left]
+kind = "markdown_links"
+path = "~/.claude/projects/C--Windows-system32/memory/MEMORY.md"
+
+[rule.right]
+kind = "dir"
+path = "~/.claude/projects/C--Windows-system32/memory"
+glob = "*.md"
+only = "files"
+
+# ---------------------------------------------------------------------------
+# 記憶の中の相互参照: [[名前]] が実在するか
+# 存在しない [[名前]] は「後で書く」の印なので、ずれとして出しつつ許容してよい
+# ---------------------------------------------------------------------------
+[[rule]]
+name = "memory-wikilinks-resolve"
+title = "記憶の中の [[参照]] が実在する"
+direction = "left_subset_right"
+left_label = "実在する記憶"
+right_label = "実在する記憶"
+note = "未作成の [[参照]] は「書くべきこと」の印。消さずに眺める用"
+
+[rule.left]
+kind = "wikilinks"
+path = "~/.claude/projects/C--Windows-system32/memory"
+glob = "*.md"
+
+[rule.right]
+kind = "dir"
+path = "~/.claude/projects/C--Windows-system32/memory"
+glob = "*.md"
+only = "files"
+strip_suffix = ".md"
+
+# ---------------------------------------------------------------------------
+# skill: INDEX.md は「Nagi が自律的に skill を選ぶための判断材料」なので、
+# 実体との食い違いはそのまま判断の誤りになる
+# ---------------------------------------------------------------------------
+[[rule]]
+name = "skills-indexed"
+title = "すべての skill が INDEX.md に載っている"
+direction = "left_subset_right"
+left_label = "INDEX.md"
+right_label = "INDEX.md"
+note = "載っていない skill は、選択肢として存在しないのと同じ"
+
+[rule.left]
+kind = "dir"
+path = "~/.agents/skills"
+glob = "[!.]*"
+only = "dirs"
+
+[rule.right]
+kind = "headings"
+path = "~/.agents/skills/INDEX.md"
+level = 3
+pattern = "^([a-z0-9-]+)"
+until = "ドメイン特化"      # ここから先は project local。global には置かない約束
+
+[[rule]]
+name = "skills-no-ghosts"
+title = "INDEX.md の skill に実体がある"
+direction = "left_subset_right"
+left_label = "実体"
+right_label = "実体"
+note = "実体の無い項目は、消した skill の残骸"
+
+[rule.left]
+kind = "headings"
+path = "~/.agents/skills/INDEX.md"
+level = 3
+pattern = "^([a-z0-9-]+)"
+until = "ドメイン特化"      # ここから先は project local。global には置かない約束
+
+[rule.right]
+kind = "dir"
+path = "~/.agents/skills"
+glob = "[!.]*"
+only = "dirs"
+
+# ---------------------------------------------------------------------------
+# INDEX.md の「ドメイン特化」節は、global ではなく project local に置く約束。
+# 節ごとに置き場所が違うので、突き合わせる相手も節ごとに変える。
+#
+# 2026-08-03: この区別を書いていなかったため、blender-web-pipeline を
+# 「消した skill の残骸」と誤って報告した。実体は STG 側にあった。
+# tsugime が自動で直す作りだったら、この行は消えていた。
+# ---------------------------------------------------------------------------
+[[rule]]
+name = "skills-project-local"
+title = "INDEX.md の project local 節に載っているものが STG に実在する"
+direction = "left_subset_right"
+left_label = "INDEX.md(project local 節)"
+right_label = "STG の実体"
+note = "置き場所が違うだけで、載っている以上は実体があるべき"
+
+[rule.left]
+kind = "headings"
+path = "~/.agents/skills/INDEX.md"
+level = 3
+pattern = "^([a-z0-9-]+)"
+after = "ドメイン特化"
+
+[rule.right]
+kind = "dir"
+path = "C:/Dev/stg/.agents/skills"
+glob = "[!.]*"
+only = "dirs"
+
+# ---------------------------------------------------------------------------
+# 作業中のものが版管理に載っていないと、消したときに戻せない。
+# 「載せるべきでないもの」は exclude に書いて、意図を残す。
+# ---------------------------------------------------------------------------
+[[rule]]
+name = "projects-versioned"
+title = 'C:\Dev の各プロジェクトが git リポジトリになっている'
+direction = "left_subset_right"
+left_label = "git リポジトリ"
+right_label = "git リポジトリ"
+note = "版管理に載っていないものは、消したら戻せない"
+
+[rule.left]
+kind = "dir"
+path = "C:/Dev"
+glob = "[!.]*"
+only = "dirs"
+exclude = ["IDFU-lab"]          # 本体の複製。意図的に版管理しない
+
+[rule.right]
+kind = "git"
+path = "C:/Dev"
+what = "repos"
