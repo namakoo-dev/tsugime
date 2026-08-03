@@ -21,13 +21,16 @@ classifiers = [
 ]
 dependencies = ["mcp>=1.29,<2"]
 
+[project.scripts]
+tsugime = "cli:main"
+
 [project.urls]
 Repository = "https://github.com/watasisaikou/tsugime"
 
 [tool.setuptools]
 # Flat layout: three top-level modules, so setuptools has to be told
 # explicitly rather than left to auto-discovery.
-py-modules = ["server", "reconcile", "sources"]
+py-modules = ["server", "cli", "reconcile", "sources"]
 
 [tool.ruff]
 line-length = 96

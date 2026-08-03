@@ -31,7 +31,9 @@ def find_config(explicit: str | None = None) -> Path:
     「A を検査したつもりで B を検査して緑が出る」ことになる。
     それはこの道具が防ごうとしているものそのもの。
     """
-    for named, value in (("-c", explicit), ("TSUGIME_CONFIG", os.environ.get("TSUGIME_CONFIG"))):
+    named_sources = (("-c", explicit),
+                     ("TSUGIME_CONFIG", os.environ.get("TSUGIME_CONFIG")))
+    for named, value in named_sources:
         if value:
             p = Path(value).expanduser()
             if not p.is_file():

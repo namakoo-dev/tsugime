@@ -168,6 +168,7 @@ Used from CI (GitHub Actions):
 | `headings` | headings, filtered by depth and regex | `level` `pattern` `after` `until` |
 | `frontmatter` | one field from each file's frontmatter | `field` `glob` |
 | `json` | an array or object inside a JSON file | `pointer` `field` |
+| `http_json` | an array or object inside JSON fetched via HTTP GET | `url` `pointer` `field` `token_env` `headers` `timeout` |
 | `sqlite` | the first column of a SELECT (**opened read-only**) | `query` |
 
 `git` never shells out to `git` — it reads `.git` directly, so the result
@@ -176,6 +177,28 @@ doesn't depend on the environment it runs in.
 Either side can be normalised: `strip_suffix`, `basename`, `lower`, `exclude`.
 
 **Directions**: `left_subset_right`, `right_subset_left`, `equal`.
+
+## Secrets (`http_json`)
+
+`http_json` is the only adapter that talks to an external service, so its
+handling of secrets gets its own short section.
+
+- **The config file never holds a token.** What you write is an environment
+- **It only ever sends GET.** The method is hardcoded; no setting can change it.
+  variable name (`token_env`)
+- **If that environment variable is unset, it fails instead of sending the
+  request unauthenticated** (so a 401 doesn't get misread as "could not read")
+- **Failure messages never include the URL's query string or the token value**
+
+```toml
+[rule.right]
+kind = "http_json"
+url = "https://api.github.com/repos/OWNER/REPO/releases"
+field = "tag_name"
+token_env = "GITHUB_TOKEN"          # a variable name, not a value
+headers = { Accept = "application/vnd.github+json" }
+timeout = 10
+```
 
 ## MCP tools
 
@@ -235,7 +258,12 @@ first try; they are something you **sharpen while reading the drift reports.**
 - **An empty side is not treated as an error.** A rule whose sources match nothing
   still reports "in sync". Always read `left_count` / `right_count`
 - **It does not fix anything.** There is no auto-repair
-- No HTTP or remote-API adapters yet — local files and SQLite only
+- **`http_json` supports one auth form: `Authorization: Bearer`.** No Basic auth,
+  no signed headers, no other scheme
+- **`http_json` does not follow pagination.** It only looks at a single response.
+  A paginated API will be missing whatever keys are on later pages
+- **`http_json` does not cache.** It sends a fresh request for every rule that
+  uses that URL
 
 ## Licence
 

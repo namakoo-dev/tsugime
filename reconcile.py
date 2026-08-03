@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from sources import Keys, SourceError, Where, read
+from sources import Keys, SourceError, read
 
 DIRECTIONS = {
     "left_subset_right": "左のすべてが右に現れる",
@@ -118,6 +118,13 @@ def check(rule: Rule) -> Outcome:
         right = read(rule.right)
     except SourceError as e:
         return Outcome(rule=rule, error=str(e))
+    except Exception as e:
+        # **1 本の規則の書き損じで、全部の結果を失わせない。**
+        # アダプタは想定外の例外も投げうる（設定値の型違いなど）。
+        # それをここで止めずに通すと、健全な規則の判定まで道連れになり、
+        # 「今どこがずれているか」を答えるという役目そのものが果たせなくなる。
+        # 種類まで出すのは、SourceError にすべき経路の取りこぼしを見つけるため。
+        return Outcome(rule=rule, error=f"想定外の失敗: {type(e).__name__}: {e}")
 
     out = Outcome(rule=rule, left_count=len(left), right_count=len(right))
     if rule.direction in ("left_subset_right", "equal"):

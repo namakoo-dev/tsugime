@@ -237,3 +237,45 @@ def test_regression_index_entry_with_no_real_entity_reports_line_number(tmp_path
     d = out.drift[0]
     assert d.missing_from == "実体"
     assert d.found_at == f"{index}:4"
+
+
+def test_one_broken_rule_does_not_take_down_the_others(tmp_path, monkeypatch):
+    """★アダプタが想定外の例外を投げても、他の規則の判定は残る。
+
+    1 本の書き損じで全部の結果が消えると、「今どこがずれているか」を
+    答えるという役目そのものが果たせなくなる。
+    """
+    import reconcile as R
+    import sources
+
+    left = tmp_path / "left"
+    left.mkdir()
+    (left / "a.md").write_text("x", encoding="utf-8")
+    idx = tmp_path / "idx.md"
+    idx.write_text("- [a](a.md)\n", encoding="utf-8")
+    toml = tmp_path / "t.toml"
+    toml.write_text(
+        f'[[rule]]\nname = "healthy"\n'
+        f'[rule.left]\nkind = "dir"\npath = {str(left)!r}\nglob = "*.md"\n'
+        f'[rule.right]\nkind = "markdown_links"\npath = {str(idx)!r}\n'
+        f'[[rule]]\nname = "explodes"\n'
+        f'[rule.left]\nkind = "dir"\npath = {str(left)!r}\nglob = "boom"\n'
+        f'[rule.right]\nkind = "markdown_links"\npath = {str(idx)!r}\n',
+        encoding="utf-8",
+    )
+
+    real = sources.read
+
+    def sometimes_explodes(spec):
+        if spec.get("glob") == "boom":
+            raise TypeError("想定外")
+        return real(spec)
+
+    monkeypatch.setattr(R, "read", sometimes_explodes)
+
+    out = R.check_all(R.load_rules(toml))
+    by_name = {o.rule.name: o for o in out}
+    assert by_name["healthy"].ok, "健全な規則の判定が失われた"
+    assert by_name["explodes"].error is not None
+    assert "TypeError" in by_name["explodes"].error
+    assert R.summarise(out)["errored"] == 1

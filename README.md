@@ -161,6 +161,7 @@ CI から使う例（GitHub Actions）:
 | `headings` | 見出し。深さと正規表現で絞れる | `level` `pattern` `after` `until` |
 | `frontmatter` | 各ファイルの frontmatter の 1 項目 | `field` `glob` |
 | `json` | JSON の配列 / オブジェクト | `pointer` `field` |
+| `http_json` | HTTP GET した JSON の配列 / オブジェクト | `url` `pointer` `field` `token_env` `headers` `timeout` |
 | `sqlite` | SELECT の 1 列目（**読み取り専用で開きます**） | `query` |
 
 `git` は外部の `git` コマンドを呼ばず、`.git` の中を直接読みます
@@ -169,6 +170,25 @@ CI から使う例（GitHub Actions）:
 どの側にも正規化を掛けられます: `strip_suffix` / `basename` / `lower` / `exclude`。
 
 **方向**は 3 つ: `left_subset_right` / `right_subset_left` / `equal`。
+
+## 秘密の扱い（`http_json`）
+
+`http_json` は外部サービスに繋ぐ唯一の入口なので、秘密の扱いだけ切り出して書いておきます。
+
+- **設定ファイルにトークンを直接書かせません。** 書くのは環境変数名（`token_env`）だけです
+- **その環境変数が無ければ、黙って未認証で投げず、失敗します**（401 を「読めなかった」と誤認しないため）
+- **失敗メッセージには URL のクエリ文字列以降とトークンの値を含めません**
+- **GET しか送りません。** 実装で固定してあり、設定から変える手段はありません
+
+```toml
+[rule.right]
+kind = "http_json"
+url = "https://api.github.com/repos/OWNER/REPO/releases"
+field = "tag_name"
+token_env = "GITHUB_TOKEN"          # 値ではなく環境変数名を書く
+headers = { Accept = "application/vnd.github+json" }
+timeout = 10
+```
 
 ## MCP のツール
 
@@ -224,7 +244,9 @@ project local 節は別の場所と突き合わせる規則を新しく書きま
   規則が何も見ていない状態でも「ずれなし」と出ます。件数（`left_count` / `right_count`）を
   必ず見てください
 - **直しません。** 自動修復はありません
-- HTTP や外部 API のアダプタはまだありません。今あるのはローカルのファイルと SQLite だけです
+- **`http_json` の認証は `Authorization: Bearer` 一形式だけです。** Basic 認証や署名付きヘッダなど、他の認証方式には対応していません
+- **`http_json` はページングを追いません。** 応答 1 回分だけを見ます。ページ分割された API では、その分だけ鍵が欠けます
+- **`http_json` は応答をキャッシュしません。** その URL を使う規則の数だけ、毎回リクエストします
 
 ## ライセンス
 
