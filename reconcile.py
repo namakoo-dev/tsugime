@@ -14,12 +14,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from sources import Keys, SourceError, read
+from sources import NO_VALUE, VALUE_CAPABLE_KINDS, Keys, SourceError, read
 
 DIRECTIONS = {
     "left_subset_right": "左のすべてが右に現れる",
     "right_subset_left": "右のすべてが左に現れる",
     "equal": "左と右が完全に一致する",
+    "values_agree": "両側にある鍵について、値が一致する",
 }
 
 
@@ -49,16 +50,35 @@ class Drift:
 
 
 @dataclass
+class ValueMismatch:
+    """両側にある鍵なのに、値が食い違った。
+
+    どちらが正しいかは tsugime には決められないので、両側の値と
+    両側の出どころをそのまま持ち回り、判断は人（か AI）に渡す。
+    """
+
+    key: str
+    left_value: Any
+    left_where: str
+    right_value: Any
+    right_where: str
+
+
+@dataclass
 class Outcome:
     rule: Rule
     drift: list[Drift] = field(default_factory=list)
     left_count: int = 0
     right_count: int = 0
     error: str | None = None
+    # values_agree でのみ埋まる。共通鍵が 0 件のまま「一致」と出るのは
+    # 既知の落とし穴と同じ形なので、件数そのものを持ち回って render() に出す。
+    common_count: int | None = None
+    value_mismatches: list[ValueMismatch] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
-        return self.error is None and not self.drift
+        return self.error is None and not self.drift and not self.value_mismatches
 
 
 def load_rules(path: str | Path) -> list[Rule]:
@@ -127,10 +147,51 @@ def check(rule: Rule) -> Outcome:
         return Outcome(rule=rule, error=f"想定外の失敗: {type(e).__name__}: {e}")
 
     out = Outcome(rule=rule, left_count=len(left), right_count=len(right))
+
+    if rule.direction == "values_agree":
+        return _check_values_agree(rule, left, right, out)
+
     if rule.direction in ("left_subset_right", "equal"):
         out.drift += _missing(left, right, rule.right_label)
     if rule.direction in ("right_subset_left", "equal"):
         out.drift += _missing(right, left, rule.left_label)
+    return out
+
+
+def _check_values_agree(rule: Rule, left: Keys, right: Keys, out: Outcome) -> Outcome:
+    """values_agree の判定本体。
+
+    両側にある鍵についてのみ値を比べる。片側にしか無い鍵はここでは報告しない
+    （存在の有無は既存の 3 方向が別の規則として見る領域）。
+
+    値を持てない源（kind が VALUE_CAPABLE_KINDS の外）を使っていたら、
+    黙って「全部一致」と言わせず、はっきり失敗させる。同様に、kind としては
+    値を持てるはずなのに、この読み出しでは共通鍵の値が取れていない場合も
+    失敗させる（さもないと NO_VALUE 同士が「一致」に化ける）。
+    """
+    for label, spec in ((rule.left_label, rule.left), (rule.right_label, rule.right)):
+        kind = spec.get("kind")
+        if kind not in VALUE_CAPABLE_KINDS:
+            return Outcome(rule=rule, error=(
+                f"values_agree には値を持てる源が要る: {label} の kind={kind!r} は"
+                f"値を持てない（使えるのは {', '.join(sorted(VALUE_CAPABLE_KINDS))}）"
+            ))
+
+    common = sorted(set(left) & set(right))
+    out.common_count = len(common)
+    for k in common:
+        lw, rw = left[k], right[k]
+        if lw.value is NO_VALUE or rw.value is NO_VALUE:
+            return Outcome(rule=rule, error=(
+                f"values_agree: 鍵 {k!r} の値が読み出せていない"
+                "（値を持てる kind でも、この設定では値が取れていない）"
+            ))
+        if str(lw.value) != str(rw.value):
+            out.value_mismatches.append(ValueMismatch(
+                key=k,
+                left_value=lw.value, left_where=str(lw),
+                right_value=rw.value, right_where=str(rw),
+            ))
     return out
 
 
@@ -146,9 +207,11 @@ def summarise(outcomes: list[Outcome]) -> dict[str, Any]:
     return {
         "rules": len(outcomes),
         "in_sync": sum(1 for o in outcomes if o.ok),
-        "drifted": sum(1 for o in outcomes if o.error is None and o.drift),
+        "drifted": sum(
+            1 for o in outcomes if o.error is None and (o.drift or o.value_mismatches)
+        ),
         "errored": sum(1 for o in outcomes if o.error),
-        "drift_items": sum(len(o.drift) for o in outcomes),
+        "drift_items": sum(len(o.drift) + len(o.value_mismatches) for o in outcomes),
     }
 
 
@@ -167,6 +230,29 @@ def render(outcomes: list[Outcome], *, limit: int = 20) -> str:
         lines.append(head)
         if o.error:
             lines.append(f"  ✗ 読めなかった: {o.error}")
+            continue
+        if o.rule.direction == "values_agree":
+            lines.append(
+                f"  {o.rule.left_label} {o.left_count} 件 / "
+                f"{o.rule.right_label} {o.right_count} 件 — "
+                f"共通鍵 {o.common_count} 件 — {DIRECTIONS[o.rule.direction]}"
+            )
+            # 共通鍵 0 件のまま「一致」とだけ出るのは既知の落とし穴と同じ形なので、
+            # 件数を必ず見せる（上の行で既に出している）。
+            if not o.value_mismatches:
+                lines.append(f"  ✓ 一致（共通鍵 {o.common_count} 件）")
+            else:
+                lines.append(f"  ✗ 値が食い違う {len(o.value_mismatches)} 件:")
+                for m in o.value_mismatches[:limit]:
+                    lines.append(
+                        f"      {m.key}    "
+                        f"{o.rule.left_label}={m.left_value!r} ({m.left_where})  /  "
+                        f"{o.rule.right_label}={m.right_value!r} ({m.right_where})"
+                    )
+                if len(o.value_mismatches) > limit:
+                    lines.append(f"      … 他 {len(o.value_mismatches) - limit} 件")
+            if o.rule.note:
+                lines.append(f"  » {o.rule.note}")
             continue
         lines.append(
             f"  {o.rule.left_label} {o.left_count} 件 / "

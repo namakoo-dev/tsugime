@@ -92,10 +92,18 @@ def main(argv: list[str] | None = None) -> int:
                     "error": o.error,
                     "left_count": o.left_count,
                     "right_count": o.right_count,
+                    "common_count": getattr(o, "common_count", 0),
                     "drift": [
                         {"key": d.key, "missing_from": d.missing_from,
                          "found_at": d.found_at}
                         for d in o.drift
+                    ],
+                    "value_mismatches": [
+                        {"key": m.key,
+                         "left_value": str(m.left_value),
+                         "right_value": str(m.right_value),
+                         "left_at": str(m.left_where), "right_at": str(m.right_where)}
+                        for m in getattr(o, "value_mismatches", [])
                     ],
                 }
                 for o in outcomes
@@ -107,7 +115,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.strict:
         # **読めなかった規則も失敗として扱う。** 見ていないものを
         # 「ずれていない」と数えるのは、この道具が一番やってはいけないこと。
-        if any(o.error or o.drift for o in outcomes):
+        #
+        # 判定は Outcome.ok に委ねる。個々の失敗要因をここで並べると、
+        # 判定の種類が増えたときに **CI だけが古い基準のまま緑を返す。**
+        # 実際、値の不一致 (values_agree) を足したとき、
+        # ここが `o.error or o.drift` のままで見落とす状態になっていた。
+        if any(not o.ok for o in outcomes):
             return 1
     return 0
 

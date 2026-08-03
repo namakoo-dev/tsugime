@@ -149,3 +149,50 @@ def test_never_writes_anything(tmp_path, args, capsys):
     cli.main(["-c", str(toml), *args])
     after = {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
     assert before == after
+
+
+def _values_toml(tmp_path, left="1.0.0", right="2.0.0"):
+    (tmp_path / "a.txt").write_text(f'version = "{left}"\n', encoding="utf-8")
+    (tmp_path / "b.txt").write_text(f'version = "{right}"\n', encoding="utf-8")
+    toml = tmp_path / "v.toml"
+    toml.write_text(
+        '[[rule]]\nname = "v"\ndirection = "values_agree"\n'
+        f'[rule.left]\nkind = "regex"\npath = {str(tmp_path / "a.txt")!r}\n'
+        "pattern = 'version = \"([^\"]+)\"'\nkey = \"version\"\n"
+        f'[rule.right]\nkind = "regex"\npath = {str(tmp_path / "b.txt")!r}\n'
+        "pattern = 'version = \"([^\"]+)\"'\nkey = \"version\"\n",
+        encoding="utf-8",
+    )
+    return toml
+
+
+def test_strict_fails_on_a_value_mismatch(tmp_path, capsys):
+    """★値の不一致でも --strict は 1 を返す。
+
+    判定は Outcome.ok に委ねてある。個々の失敗要因を並べる書き方だと、
+    判定の種類が増えたときに CI だけが古い基準のまま緑を返す。
+    実際 values_agree を足したとき、ここが drift しか見ておらず見落としていた。
+    """
+    toml = _values_toml(tmp_path)
+    assert cli.main(["-c", str(toml), "--strict"]) == 1
+    assert "値が食い違う" in capsys.readouterr().out
+
+
+def test_strict_passes_when_values_agree(tmp_path):
+    """値が一致していれば 0。"""
+    toml = _values_toml(tmp_path, left="1.0.0", right="1.0.0")
+    assert cli.main(["-c", str(toml), "--strict"]) == 0
+
+
+def test_json_carries_value_mismatches_and_common_count(tmp_path, capsys):
+    """--json に値の不一致と共通鍵の件数が載る。
+
+    載せないと、機械から見て「drift が空 = ずれなし」に見える。
+    """
+    toml = _values_toml(tmp_path)
+    assert cli.main(["-c", str(toml), "--json"]) == 0
+    res = json.loads(capsys.readouterr().out)["results"][0]
+    assert res["common_count"] == 1
+    vm = res["value_mismatches"][0]
+    assert vm["left_value"] == "1.0.0" and vm["right_value"] == "2.0.0"
+    assert vm["left_at"] and vm["right_at"]

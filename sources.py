@@ -27,18 +27,28 @@ class SourceError(Exception):
     """読み出せない。設定の誤りか、対象が存在しないか。"""
 
 
+# 「値を持てなかった」を示す印。None（JSON の null や、実際に空の値）と
+# 区別する必要があるので、None をデフォルトにはしない。
+NO_VALUE = object()
+
+
 @dataclass(frozen=True)
 class Where:
-    """鍵を見つけた場所。"""
+    """鍵を見つけた場所。値を持てる源では `value` も添える（既定は NO_VALUE = 値なし）。"""
 
     path: str
     line: int | None = None
+    value: Any = NO_VALUE
 
     def __str__(self) -> str:
         return f"{self.path}:{self.line}" if self.line else self.path
 
 
 Keys = dict[str, Where]
+
+# 値を持てる源の種類。values_agree はこれ以外の kind を拒む
+# （値を持てない源で「一致」を語らせないため）。
+VALUE_CAPABLE_KINDS = frozenset({"regex", "sqlite", "json", "http_json", "frontmatter"})
 
 MD_LINK_RE = re.compile(r"\[[^\]]*\]\(([^)\s]+)\)")
 WIKILINK_RE = re.compile(r"\[\[([^\]|#]+)")
@@ -173,6 +183,10 @@ def _frontmatter(spec: dict[str, Any]) -> Keys:
 
     YAML は解析しない。`名前: 値` の行を拾うだけ。**入れ子や配列は読めない。**
     読めなかったファイルは `missing` として報告する側に回す（黙って落とさない）。
+
+    `value_field` を指定すると、`field` の値を鍵にするのは変わらず、
+    さらに `value_field` の値をその鍵の値として添える。
+    指定が無ければ今どおり（値なし）。
     """
     root = _expand(spec["path"])
     if not root.is_dir():
@@ -180,7 +194,10 @@ def _frontmatter(spec: dict[str, Any]) -> Keys:
     field = spec.get("field")
     if not field:
         raise SourceError("frontmatter には `field` が要る")
+    value_field = spec.get("value_field")
     fre = re.compile(rf"^{re.escape(field)}\s*:\s*(.+?)\s*$", re.M)
+    vre = (re.compile(rf"^{re.escape(value_field)}\s*:\s*(.+?)\s*$", re.M)
+           if value_field else None)
     found: dict[str, Where] = {}
     for p in sorted(root.glob(spec.get("glob", "*.md"))):
         if not p.is_file():
@@ -193,7 +210,13 @@ def _frontmatter(spec: dict[str, Any]) -> Keys:
         if not m:
             continue
         val = m.group(1).strip().strip("\"'")
-        found.setdefault(val, Where(str(p)))
+        if vre:
+            vm = vre.search(fm.group(1))
+            where = (Where(str(p), value=vm.group(1).strip().strip("\"'"))
+                     if vm else Where(str(p)))
+            found.setdefault(val, where)
+        else:
+            found.setdefault(val, Where(str(p)))
     return _apply(found, spec)
 
 
@@ -203,6 +226,9 @@ def _json_keys(spec: dict[str, Any]) -> Keys:
     `pointer` は `/a/b` 形式（RFC 6901 の簡易版）。
     配列なら要素そのもの（または `field` を指定して各要素の項目）、
     オブジェクトならキーを鍵にする。
+
+    オブジェクトのときは、キー=鍵に加えて値も添える。値が dict/list なら
+    比較・表示できるよう JSON 文字列にする。配列のときは今どおり値を持たない。
     """
     path = _expand(spec["path"])
     if not path.is_file():
@@ -225,8 +251,9 @@ def _json_keys(spec: dict[str, Any]) -> Keys:
     field = spec.get("field")
     found: dict[str, Where] = {}
     if isinstance(node, dict):
-        for k in node:
-            found.setdefault(str(k), Where(str(path)))
+        for k, v in node.items():
+            val = json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else v
+            found.setdefault(str(k), Where(str(path), value=val))
     elif isinstance(node, list):
         for e in node:
             key = e.get(field) if (field and isinstance(e, dict)) else e
@@ -308,8 +335,9 @@ def _http_json(spec: dict[str, Any]) -> Keys:
     where = Where(f"{safe_url}#{pointer}" if pointer else safe_url)
     found: dict[str, Where] = {}
     if isinstance(node, dict):
-        for k in node:
-            found.setdefault(str(k), where)
+        for k, v in node.items():
+            val = json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else v
+            found.setdefault(str(k), Where(where.path, value=val))
     elif isinstance(node, list):
         for e in node:
             key = e.get(field) if (field and isinstance(e, dict)) else e
@@ -321,22 +349,34 @@ def _http_json(spec: dict[str, Any]) -> Keys:
 
 
 def _sqlite(spec: dict[str, Any]) -> Keys:
-    """SQLite の 1 列を鍵にする。**読み取り専用で開く。**"""
+    """SQLite の 1 列を鍵にする。**読み取り専用で開く。**
+
+    `query` が 2 列返すなら、1 列目を鍵、2 列目を値にする。3 列以上は SourceError。
+    """
     path = _expand(spec["path"])
     if not path.is_file():
         raise SourceError(f"DB が無い: {path}")
     query = spec.get("query")
     if not query:
-        raise SourceError("sqlite には `query` が要る（1 列を返すこと）")
+        raise SourceError("sqlite には `query` が要る（1 列か 2 列を返すこと）")
     if not query.lstrip().lower().startswith("select"):
         raise SourceError("sqlite の `query` は SELECT でなければならない")
     uri = f"file:{path.as_posix()}?mode=ro"
     found: dict[str, Where] = {}
     try:
         with sqlite3.connect(uri, uri=True) as db:
-            for row in db.execute(query):
+            cur = db.execute(query)
+            ncols = len(cur.description) if cur.description else 0
+            if ncols > 2:
+                raise SourceError(
+                    f"sqlite の `query` は 1 列か 2 列でなければならない（{ncols} 列返された）"
+                )
+            for row in cur:
                 if row and row[0] is not None:
-                    found.setdefault(str(row[0]), Where(str(path)))
+                    if ncols == 2:
+                        found.setdefault(str(row[0]), Where(str(path), value=row[1]))
+                    else:
+                        found.setdefault(str(row[0]), Where(str(path)))
     except sqlite3.Error as e:
         raise SourceError(f"問い合わせに失敗: {e}") from e
     return _apply(found, spec)
@@ -413,9 +453,69 @@ def _git(spec: dict[str, Any]) -> Keys:
     )
 
 
+def _regex(spec: dict[str, Any]) -> Keys:
+    """ファイルを行単位で走査し、正規表現で鍵と値を取る。値を持てる源。
+
+    使い方は 2 通り。
+
+    (a) 固定の鍵 + 捕獲した値: `key` を指定する。鍵はその固定値、
+        値はパターンの捕獲グループ 1。1 ファイル内で複数回マッチしたら
+        最初の 1 件を採る（`_apply` の setdefault と同じ流儀）。
+
+    (b) 名前付きグループで複数件: `key` を指定せず、パターンに
+        名前付きグループ `key` と `value` の両方を使う。
+
+    `key` の指定と名前付きグループ（key/value 両方）の併用は SourceError。
+    どちらでもない（`key` も無く、名前付きグループも揃っていない）場合も SourceError。
+    `path` は必須。
+    """
+    if not spec.get("path"):
+        raise SourceError("regex には `path` が要る")
+    path = _expand(spec["path"])
+    if not path.is_file():
+        raise SourceError(f"ファイルが無い: {path}")
+
+    pattern = spec.get("pattern")
+    if not pattern:
+        raise SourceError("regex には `pattern` が要る")
+    try:
+        rx = re.compile(pattern)
+    except re.error as e:
+        raise SourceError(f"正規表現として読めない: {pattern!r} ({e})") from e
+
+    fixed_key = spec.get("key")
+    named = rx.groupindex
+    has_named_pair = "key" in named and "value" in named
+
+    if fixed_key and has_named_pair:
+        raise SourceError(
+            "regex は `key` の指定と名前付きグループ (key/value) を併用できない"
+        )
+    if not fixed_key and not has_named_pair:
+        raise SourceError(
+            "regex には `key`（固定鍵 + 捕獲グループ 1 の値）か、"
+            "名前付きグループ key/value の両方のどちらかが要る"
+        )
+    if fixed_key and not rx.groups:
+        raise SourceError(f"regex: `key` 指定時は捕獲グループが要る: {pattern!r}")
+
+    found: dict[str, Where] = {}
+    for i, line in enumerate(_lines(path), 1):
+        for m in rx.finditer(line):
+            if fixed_key:
+                found.setdefault(fixed_key, Where(str(path), i, value=m.group(1)))
+            else:
+                k = m.group("key")
+                if k is None:
+                    continue
+                found.setdefault(k, Where(str(path), i, value=m.group("value")))
+    return _apply(found, spec)
+
+
 ADAPTERS = {
     "dir": _dir,
     "git": _git,
+    "regex": _regex,
     "markdown_links": _markdown_links,
     "wikilinks": _wikilinks,
     "headings": _headings,

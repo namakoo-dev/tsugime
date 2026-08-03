@@ -132,6 +132,10 @@ def tsugime_check(rule: str | None = None, limit: int = 50) -> dict[str, Any]:
     Returns:
         dict: {"config", "summary": {...}, "results": [...]}。
         summary は rules / in_sync / drifted / errored / drift_items。
+        各 result には drift（片側に無い鍵）と value_mismatches（両側にあるが
+        値が食い違う鍵）の両方が入る。**drift が空でも ok とは限らない。**
+        common_count は values_agree で実際に突き合わせた鍵の数。0 なら
+        「一致」ではなく「何も見ていない」。
     """
     path, rules = _load()
     outcomes = reconcile.check_all(rules, only=rule)
@@ -148,11 +152,22 @@ def tsugime_check(rule: str | None = None, limit: int = 50) -> dict[str, Any]:
             "left_label": o.rule.left_label,
             "right_label": o.rule.right_label,
             "note": o.rule.note,
+            "common_count": o.common_count,
             "drift": [
                 {"key": d.key, "missing_from": d.missing_from, "found_at": d.found_at}
                 for d in shown
             ],
             "truncated": max(0, len(o.drift) - len(shown)),
+            # values_agree の結果はここにしか出ない。落とすと MCP から見たとき
+            # 「drift が空 = ずれなし」に見えてしまう。
+            "value_mismatches": [
+                {"key": m.key,
+                 "left_value": str(m.left_value), "right_value": str(m.right_value),
+                 "left_at": str(m.left_where), "right_at": str(m.right_where)}
+                for m in o.value_mismatches[: max(0, int(limit))]
+            ],
+            "value_mismatches_truncated": max(
+                0, len(o.value_mismatches) - max(0, int(limit))),
         })
     return {
         "config": str(path),
