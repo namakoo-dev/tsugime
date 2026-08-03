@@ -163,13 +163,99 @@ CI から使う例（GitHub Actions）:
 | `json` | JSON の配列 / オブジェクト | `pointer` `field` |
 | `http_json` | HTTP GET した JSON の配列 / オブジェクト | `url` `pointer` `field` `token_env` `headers` `timeout` |
 | `sqlite` | SELECT の 1 列目（**読み取り専用で開きます**） | `query` |
+| `regex` | 行を正規表現で走査した鍵（値も持てる） | `pattern` `key` |
 
 `git` は外部の `git` コマンドを呼ばず、`.git` の中を直接読みます
 （走る環境によって結果が変わらないように）。
 
 どの側にも正規化を掛けられます: `strip_suffix` / `basename` / `lower` / `exclude`。
 
-**方向**は 3 つ: `left_subset_right` / `right_subset_left` / `equal`。
+### `regex` の 2 通りの使い方
+
+(a) 鍵は固定、値は捕獲グループ 1:
+
+```toml
+[rule.left]
+kind = "regex"
+path = "pyproject.toml"
+pattern = 'version\s*=\s*"([^"]+)"'
+key = "version"
+```
+
+(b) 名前付きグループ `(?P<key>)` `(?P<value>)` で、1 ファイルから複数件:
+
+```toml
+[rule.right]
+kind = "regex"
+path = "deployed.env"
+pattern = '(?P<key>[A-Z_]+)=(?P<value>.+)'
+```
+
+**方向**は 4 つです。それぞれ 1 つの問いに答えます。
+
+- `left_subset_right` — 左のすべてが右に現れるか
+- `right_subset_left` — 右のすべてが左に現れるか
+- `equal` — 左と右が完全に一致するか
+- `values_agree` — 両側にある鍵について、値が一致するか
+
+## 値も見る（`values_agree`）
+
+3 つの方向は「鍵の集合」しか見ません。同じ鍵が両側にあっても、
+**その値まで一致しているかは見ていませんでした。** バージョン番号が典型例です——
+索引には載っているのに、書いてある値そのものが食い違っている。
+
+`values_agree` はこの問いに答えます: **両側にある鍵について、値が一致するか。**
+
+```toml
+[[rule]]
+name = "version-matches-deploy"
+title = "pyproject.toml のバージョンと、デプロイ済みの記録が一致する"
+direction = "values_agree"
+left_label = "pyproject.toml"
+right_label = "デプロイ記録"
+note = "デモ: 手元と本番でバージョンがずれている例"
+
+[rule.left]
+kind = "regex"
+path = "pyproject.toml"
+pattern = 'version\s*=\s*"([^"]+)"'
+key = "version"
+
+[rule.right]
+kind = "regex"
+path = "deployed.env"
+pattern = "(?P<key>[A-Z_]+)=(?P<value>.+)"
+lower = true
+```
+
+```
+規則 1 件 — 一致 0 / ずれ 1 / 読めず 0   ずれた項目 1 件
+
+[version-matches-deploy] pyproject.toml のバージョンと、デプロイ済みの記録が一致する
+  pyproject.toml 1 件 / デプロイ記録 1 件 — 共通鍵 1 件 — 両側にある鍵について、値が一致する
+  ✗ 値が食い違う 1 件:
+      version    pyproject.toml='1.2.0' (pyproject.toml:3)  /  デプロイ記録='1.1.0' (deployed.env:1)
+  » デモ: 手元と本番でバージョンがずれている例
+```
+
+設計上、意図して決めていることが 4 つあります。
+
+- **片側にしか無い鍵は報告しません。** 1 つの規則は 1 つの問いに答えます。存在まで見たいなら、
+  `left_subset_right` などの規則を別に書いてください
+- **どちらが正しいかは tsugime には決められません。** だから両側の値と両側の出どころを
+  そのまま出します。判断は人（か AI）に渡します
+- **値を持てない源を `values_agree` に使うとエラーになります。** 黙って「全部一致」と
+  言わせないためです。使えるのは `frontmatter` / `http_json` / `json` / `regex` / `sqlite` だけです
+- **共通鍵が 0 件でも「一致」とは出ません。** 「何も見ていない」ことが件数として必ず出ます
+  （上の出力の「共通鍵 N 件」）
+
+既存のアダプタにも、値を返せるようになったものがあります:
+
+- `sqlite`: `query` が 2 列返すと、1 列目が鍵・2 列目が値になります（3 列以上は失敗）
+- `json` / `http_json`: `pointer` の先がオブジェクトなら、キーが鍵・値がそのまま値になります
+  （配列のままなら今どおり値は持ちません）
+- `frontmatter`: `value_field` を指定すると、`field` の値を鍵にしつつ、`value_field` の値を
+  値として添えます
 
 ## 秘密の扱い（`http_json`）
 
@@ -238,6 +324,8 @@ project local 節は別の場所と突き合わせる規則を新しく書きま
 ## 分かっている限界
 
 - **鍵の一致は文字列の一致です。** 表記ゆれは拾えません。それは受け取った側（AI）の仕事です
+- **`values_agree` の値の比較も、文字列化してから行います**（`str(左) != str(右)`）。
+  型が違っても文字列表現が同じなら一致とみなします（例: JSON の数値 `1` と文字列 `"1"`）
 - **frontmatter は YAML を解析しません。** `名前: 値` の行を拾うだけで、入れ子や配列は読めません
 - **読めなかったものは黙って落とします。** frontmatter が無いファイル、届かない
   `pointer` などは例外になりますが、**「対象が 0 件だった」ことは異常として扱いません。**

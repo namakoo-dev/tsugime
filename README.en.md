@@ -170,13 +170,108 @@ Used from CI (GitHub Actions):
 | `json` | an array or object inside a JSON file | `pointer` `field` |
 | `http_json` | an array or object inside JSON fetched via HTTP GET | `url` `pointer` `field` `token_env` `headers` `timeout` |
 | `sqlite` | the first column of a SELECT (**opened read-only**) | `query` |
+| `regex` | keys matched line-by-line with a regex (can carry a value too) | `pattern` `key` |
 
 `git` never shells out to `git` — it reads `.git` directly, so the result
 doesn't depend on the environment it runs in.
 
 Either side can be normalised: `strip_suffix`, `basename`, `lower`, `exclude`.
 
-**Directions**: `left_subset_right`, `right_subset_left`, `equal`.
+### `regex`, two ways
+
+(a) a fixed key, value from capture group 1:
+
+```toml
+[rule.left]
+kind = "regex"
+path = "pyproject.toml"
+pattern = 'version\s*=\s*"([^"]+)"'
+key = "version"
+```
+
+(b) named groups `(?P<key>)` `(?P<value>)`, multiple entries from one file:
+
+```toml
+[rule.right]
+kind = "regex"
+path = "deployed.env"
+pattern = '(?P<key>[A-Z_]+)=(?P<value>.+)'
+```
+
+**Directions**: four of them, each answering one question.
+
+- `left_subset_right` — does everything on the left appear on the right?
+- `right_subset_left` — does everything on the right appear on the left?
+- `equal` — do the left and right match exactly?
+- `values_agree` — for keys present on both sides, do the values agree?
+
+## Comparing values (`values_agree`)
+
+The three directions above only look at *sets of keys*. Two keys can match on
+both sides while **the values behind them have drifted apart.** A version
+number is the typical case — it's present in the index, but the two copies
+say different things.
+
+`values_agree` answers that question: **for keys present on both sides, do
+the values agree?**
+
+```toml
+[[rule]]
+name = "version-matches-deploy"
+title = "pyproject.toml's version agrees with what was deployed"
+direction = "values_agree"
+left_label = "pyproject.toml"
+right_label = "deployed record"
+note = "demo: local and production versions have drifted"
+
+[rule.left]
+kind = "regex"
+path = "pyproject.toml"
+pattern = 'version\s*=\s*"([^"]+)"'
+key = "version"
+
+[rule.right]
+kind = "regex"
+path = "deployed.env"
+pattern = "(?P<key>[A-Z_]+)=(?P<value>.+)"
+lower = true
+```
+
+```
+1 rule — in sync 0 / drifted 1 / unreadable 0   drift items 1
+
+[version-matches-deploy] pyproject.toml's version agrees with what was deployed
+  pyproject.toml 1 / deployed record 1 — common keys 1 — values agree for keys present on both sides
+  ✗ 1 value mismatch:
+      version    pyproject.toml='1.2.0' (pyproject.toml:3)  /  deployed record='1.1.0' (deployed.env:1)
+  » demo: local and production versions have drifted
+```
+
+(This is a translation of the real Japanese output — same convention as the
+`--help` text above.)
+
+There are four deliberate design decisions behind it:
+
+- **A key present on only one side is never reported here.** A rule answers
+  one question. If you also want to know about existence, write a separate
+  `left_subset_right`-style rule for that
+- **tsugime cannot decide which side is right.** So it surfaces both values
+  and both provenances as-is, and leaves the judgment to whoever reads the
+  report
+- **Using a value-incapable source with `values_agree` is an error.** This
+  keeps it from silently claiming "everything agrees." The usable kinds are
+  `frontmatter`, `http_json`, `json`, `regex`, and `sqlite`
+- **Zero common keys is never reported as "in sync."** "Nothing was compared"
+  always shows up as a count (the "common keys N" in the output above)
+
+Some existing adapters can now carry a value too:
+
+- `sqlite`: if `query` returns two columns, the first becomes the key and the
+  second the value (three or more columns is an error)
+- `json` / `http_json`: if `pointer` points at an object, each key becomes a
+  key and its value becomes the value (an array root still carries no values)
+- `frontmatter`: with `value_field` set, the `field` value becomes the key and
+  the `value_field` value is attached as its value
 
 ## Secrets (`http_json`)
 
@@ -253,6 +348,9 @@ first try; they are something you **sharpen while reading the drift reports.**
 
 - **Key matching is string matching.** It will not see through naming variation.
   That is the receiving side's job
+- **`values_agree` also compares values as strings** (`str(left) != str(right)`).
+  Different types with the same string form count as agreeing — e.g. the JSON
+  number `1` and the string `"1"`
 - **`frontmatter` does not parse YAML.** It picks up `name: value` lines only —
   no nesting, no arrays
 - **An empty side is not treated as an error.** A rule whose sources match nothing
