@@ -279,11 +279,11 @@ Some existing adapters can now carry a value too:
 handling of secrets gets its own short section.
 
 - **The config file never holds a token.** What you write is an environment
-- **It only ever sends GET.** The method is hardcoded; no setting can change it.
   variable name (`token_env`)
 - **If that environment variable is unset, it fails instead of sending the
   request unauthenticated** (so a 401 doesn't get misread as "could not read")
 - **Failure messages never include the URL's query string or the token value**
+- **It only ever sends GET.** The method is hardcoded; no setting can change it.
 
 ```toml
 [rule.right]
