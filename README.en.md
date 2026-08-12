@@ -10,7 +10,7 @@ An MCP server. [日本語](README.md)
 [skills-no-ghosts] every entry in INDEX.md has a directory behind it
   actual 41 / actual 40 — everything on the left appears on the right
   ✗ 1 missing from actual:
-      blender-web-pipeline    (present at C:\Users\USER\.agents\skills\INDEX.md:362)
+      blender-web-pipeline    (present at ~\.agents\skills\INDEX.md:362)
   » an entry with nothing behind it is the residue of a deleted skill
 ```
 

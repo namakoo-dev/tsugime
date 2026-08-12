@@ -10,7 +10,7 @@ MCP サーバです。[English](README.en.md)
 [skills-no-ghosts] INDEX.md の skill に実体がある
   実体 41 件 / 実体 40 件 — 左のすべてが右に現れる
   ✗ 実体 に無い 1 件:
-      blender-web-pipeline    （C:\Users\USER\.agents\skills\INDEX.md:362 にはある）
+      blender-web-pipeline    （~\.agents\skills\INDEX.md:362 にはある）
   » 実体の無い項目は、消した skill の残骸
 ```
 
