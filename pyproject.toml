@@ -25,7 +25,7 @@ dependencies = ["mcp>=1.29,<2"]
 tsugime = "cli:main"
 
 [project.urls]
-Repository = "https://github.com/watasisaikou/tsugime"
+Repository = "https://github.com/namakoo-dev/tsugime"
 
 [tool.setuptools]
 # Flat layout: three top-level modules, so setuptools has to be told

@@ -61,7 +61,7 @@ Terraform の `plan`、ArgoCD や Flux の drift detection。宣言した状態�
 ### 1. 入れる
 
 ```powershell
-git clone https://github.com/watasisaikou/tsugime.git
+git clone https://github.com/namakoo-dev/tsugime.git
 cd tsugime
 python -m venv .venv
 .venv\Scripts\pip install -r requirements.txt

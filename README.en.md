@@ -65,7 +65,7 @@ not a missing feature; it is **where the boundary belongs.**
 ### 1. Install
 
 ```bash
-git clone https://github.com/watasisaikou/tsugime.git
+git clone https://github.com/namakoo-dev/tsugime.git
 cd tsugime
 python -m venv .venv
 .venv/bin/pip install -r requirements.txt      # Windows: .venv\Scripts\pip
