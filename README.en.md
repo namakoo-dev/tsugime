@@ -170,7 +170,7 @@ Used from CI (GitHub Actions):
 | `json` | an array or object inside a JSON file | `pointer` `field` |
 | `http_json` | an array or object inside JSON fetched via HTTP GET | `url` `pointer` `field` `token_env` `headers` `timeout` |
 | `sqlite` | the first column of a SELECT (**opened read-only**) | `query` |
-| `regex` | keys matched line-by-line with a regex (can carry a value too) | `pattern` `key` |
+| `regex` | keys matched line-by-line with a regex (can carry a value too). If path is a directory, `glob` (a string or a list) picks several files | `pattern` `key` `glob` |
 
 `git` never shells out to `git` — it reads `.git` directly, so the result
 doesn't depend on the environment it runs in.

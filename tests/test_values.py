@@ -246,6 +246,27 @@ def test_regex_normalisation_applies(tmp_path) -> None:
     assert set(keys) == {"foo"}
 
 
+def test_regex_reads_several_files_through_a_glob_list(tmp_path) -> None:
+    """★ 索引が「入口 + 棚」に分かれていても 1 つの集合として読める（2026-09-23）。
+    ディレクトリ + glob の並びで、当たったファイル全部を走査し、当たらないものは読まない。"""
+    (tmp_path / "MEMORY.md").write_text("- [a](a.md) — x\n", encoding="utf-8")
+    (tmp_path / "shelf_old.md").write_text("- [b](b.md) — y\n", encoding="utf-8")
+    (tmp_path / "note.md").write_text("- [c](c.md) — 棚でない本文の中のリンク\n", encoding="utf-8")
+    keys = sources.read({
+        "kind": "regex", "path": str(tmp_path), "glob": ["MEMORY.md", "shelf_*.md"],
+        "pattern": r"\]\((?P<key>[a-z]+)\.md\)(?P<value>)",
+    })
+    assert set(keys) == {"a", "b"}
+    assert keys["b"].path.endswith("shelf_old.md") and keys["b"].line == 1
+
+
+def test_regex_glob_that_matches_nothing_is_an_error(tmp_path) -> None:
+    """当たるファイルが 1 つも無ければ黙って空集合にしない（equal が恒真になる）。"""
+    with pytest.raises(sources.SourceError):
+        sources.read({"kind": "regex", "path": str(tmp_path), "glob": ["nope_*.md"],
+                      "pattern": r"(?P<key>\w+)(?P<value>)"})
+
+
 # ---------------------------------------------------------------------------
 # sqlite — 2 列 / 1 列 / 3 列
 # ---------------------------------------------------------------------------

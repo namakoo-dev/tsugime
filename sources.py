@@ -468,12 +468,24 @@ def _regex(spec: dict[str, Any]) -> Keys:
     `key` の指定と名前付きグループ（key/value 両方）の併用は SourceError。
     どちらでもない（`key` も無く、名前付きグループも揃っていない）場合も SourceError。
     `path` は必須。
+
+    `path` がディレクトリなら `glob`（文字列か、その並び）で走査するファイルを選ぶ。
+    ★ 索引が 1 枚でなく「入口 + 棚」のように何枚かに分かれている時のため
+      （wikilinks / frontmatter / dir が既に glob を持っているのと同じ形）。
     """
     if not spec.get("path"):
         raise SourceError("regex には `path` が要る")
-    path = _expand(spec["path"])
-    if not path.is_file():
-        raise SourceError(f"ファイルが無い: {path}")
+    root = _expand(spec["path"])
+    if root.is_file():
+        files = [root]
+    elif root.is_dir():
+        globs = spec.get("glob", "*")
+        globs = [globs] if isinstance(globs, str) else list(globs)
+        files = sorted({p for g in globs for p in root.glob(g) if p.is_file()})
+        if not files:
+            raise SourceError(f"{root} に {globs} に当たるファイルが無い")
+    else:
+        raise SourceError(f"ファイルが無い: {root}")
 
     pattern = spec.get("pattern")
     if not pattern:
@@ -500,15 +512,16 @@ def _regex(spec: dict[str, Any]) -> Keys:
         raise SourceError(f"regex: `key` 指定時は捕獲グループが要る: {pattern!r}")
 
     found: dict[str, Where] = {}
-    for i, line in enumerate(_lines(path), 1):
-        for m in rx.finditer(line):
-            if fixed_key:
-                found.setdefault(fixed_key, Where(str(path), i, value=m.group(1)))
-            else:
-                k = m.group("key")
-                if k is None:
-                    continue
-                found.setdefault(k, Where(str(path), i, value=m.group("value")))
+    for path in files:
+        for i, line in enumerate(_lines(path), 1):
+            for m in rx.finditer(line):
+                if fixed_key:
+                    found.setdefault(fixed_key, Where(str(path), i, value=m.group(1)))
+                else:
+                    k = m.group("key")
+                    if k is None:
+                        continue
+                    found.setdefault(k, Where(str(path), i, value=m.group("value")))
     return _apply(found, spec)
 
 

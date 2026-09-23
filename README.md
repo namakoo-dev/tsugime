@@ -163,7 +163,7 @@ CI から使う例（GitHub Actions）:
 | `json` | JSON の配列 / オブジェクト | `pointer` `field` |
 | `http_json` | HTTP GET した JSON の配列 / オブジェクト | `url` `pointer` `field` `token_env` `headers` `timeout` |
 | `sqlite` | SELECT の 1 列目（**読み取り専用で開きます**） | `query` |
-| `regex` | 行を正規表現で走査した鍵（値も持てる） | `pattern` `key` |
+| `regex` | 行を正規表現で走査した鍵（値も持てる）。path がディレクトリなら `glob`（文字列か並び）で何枚でも | `pattern` `key` `glob` |
 
 `git` は外部の `git` コマンドを呼ばず、`.git` の中を直接読みます
 （走る環境によって結果が変わらないように）。
